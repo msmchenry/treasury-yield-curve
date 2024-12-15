@@ -26,32 +26,60 @@
 
         <div id="yield-curve-plot"></div>
         <div id="spread-plot"></div>
-        <div id="metrics-plot"></div>
+        <div id="debug-output" style="display: none;"></div>
     </div>
 
     <script>
-        const yieldCurveData = {{ plot_data.yield_curve | safe }};
-        const spreadData = {{ plot_data.spread | safe }};
-        const metricsData = {{ metrics_plot | safe }};
-        
-        Plotly.newPlot('yield-curve-plot', yieldCurveData.data, yieldCurveData.layout);
-        Plotly.newPlot('spread-plot', spreadData.data, spreadData.layout);
-        Plotly.newPlot('metrics-plot', metricsData.data, metricsData.layout);
+        function debugLog(message) {
+            console.log(message);
+            const debugDiv = document.getElementById('debug-output');
+            debugDiv.innerHTML += message + '<br>';
+        }
 
-        // Initialize slider
+        try {
+            debugLog('Starting plot creation...');
+            
+            // Parse the plot data
+            const rawData = '{{ plot_data | safe }}';
+            debugLog(`Raw data length: ${rawData.length}`);
+            
+            const plotData = JSON.parse(rawData);
+            debugLog('Successfully parsed plot data');
+            debugLog(`Plot data keys: ${Object.keys(plotData)}`);
+            
+            // Create the yield curve plot
+            debugLog('Creating yield curve plot...');
+            Plotly.newPlot('yield-curve-plot', 
+                plotData.yield_curve.data, 
+                plotData.yield_curve.layout
+            ).then(() => debugLog('Yield curve plot created'));
+            
+            // Create the spread plot
+            debugLog('Creating spread plot...');
+            Plotly.newPlot('spread-plot', 
+                plotData.spread.data, 
+                plotData.spread.layout
+            ).then(() => debugLog('Spread plot created'));
+            
+            debugLog('All plots created successfully');
+        } catch (error) {
+            debugLog(`Error creating plots: ${error.message}`);
+            document.getElementById('debug-output').style.display = 'block';
+        }
+
+        // Initialize slider with dynamic range
         const slider = document.getElementById('dateSlider');
-        const currentYear = new Date().getFullYear();
         
         noUiSlider.create(slider, {
             start: [
-                {{ start_year }},  // Use the passed start_year
-                {{ end_year }}     // Use the passed end_year
+                {{ start_year }},
+                {{ end_year }}
             ],
             connect: true,
             step: 0.25,
             range: {
-                'min': 2004,
-                'max': currentYear + 1
+                'min': {{ min_year }},
+                'max': {{ max_year }}
             }
         });
 

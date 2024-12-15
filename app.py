@@ -1,11 +1,16 @@
 from flask import Flask, render_template, request
-from services.treasury_service import TreasuryService
 import logging
 from datetime import datetime
 from config import Config
-from typing import Tuple, Union
+from typing import Union, Tuple
 from http import HTTPStatus
 import json
+import pandas as pd
+
+from services.fred_client import FredClient
+from services.data_service import DataService
+from services.analysis_service import AnalysisService
+from services.plotting_service import PlottingService
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG)
@@ -14,16 +19,19 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 app.config.from_object(Config)
 
-# Initialize treasury service
-treasury_service = TreasuryService()
+# Initialize services
+fred_client = FredClient()
+data_service = DataService(fred_client)
+analysis_service = AnalysisService()
+plotting_service = PlottingService()
 
 # Load initial data
 logger.info("Loading initial yield curve data...")
 try:
-    treasury_service.load_data()
-    if treasury_service.data is None:
+    data_service.load_data()
+    if data_service.data is None:
         raise ValueError("Failed to initialize data")
-    logger.info(f"Data loaded successfully. Shape: {treasury_service.data.shape}")
+    logger.info(f"Data loaded successfully. Shape: {data_service.data.shape}")
 except Exception as e:
     logger.error(f"Error loading initial data: {str(e)}")
     raise
@@ -32,8 +40,8 @@ def validate_year_input(year: str) -> bool:
     """Validate that the year input is within acceptable range."""
     try:
         year_float = float(year)
-        min_date = treasury_service.data.index.min()
-        max_date = treasury_service.data.index.max()
+        min_date = data_service.data.index.min()
+        max_date = data_service.data.index.max()
         min_year = min_date.year + min_date.month/12
         max_year = max_date.year + max_date.month/12
         return min_year <= year_float <= max_year
@@ -46,16 +54,16 @@ def index() -> Union[str, Tuple[str, int]]:
     logger.debug("Index route accessed")
     try:
         # Ensure data is loaded
-        if treasury_service.data is None:
+        if data_service.data is None:
             logger.info("Data not loaded, attempting to reload...")
-            treasury_service.load_data()
+            data_service.load_data()
             
-        if treasury_service.data is None:
+        if data_service.data is None:
             return "Unable to load Treasury data. Please try again later.", HTTPStatus.SERVICE_UNAVAILABLE
         
         # Get the full date range from the data
-        min_date = treasury_service.data.index.min()
-        max_date = treasury_service.data.index.max()
+        min_date = data_service.data.index.min()
+        max_date = data_service.data.index.max()
         
         # Convert dates to decimal years for the slider
         min_year = min_date.year + (min_date.month - 1)/12
@@ -85,13 +93,29 @@ def index() -> Union[str, Tuple[str, int]]:
             start_year = str(default_start)
             end_year = str(default_end)
 
-        plot_data = treasury_service.get_yield_curve_plot(start_year, end_year)
-        metrics_fig = treasury_service.plot_metrics()
-        metrics_data = json.dumps(metrics_fig.to_dict())
+        # Get filtered data
+        filtered_df = data_service.filter_by_date_range(start_year, end_year)
+        
+        # Generate forecast
+        forecast_df = analysis_service.generate_forecast(filtered_df)
+        
+        # Calculate metrics
+        metrics = analysis_service.calculate_metrics_over_time(filtered_df)
+        
+        # Create all plots
+        plot_data = plotting_service.create_plots(filtered_df, forecast_df, metrics)
+        
+        # Debug logging
+        logger.debug(f"Plot data keys: {plot_data.keys()}")
+        logger.debug(f"Yield curve data keys: {plot_data['yield_curve'].keys()}")
+        logger.debug(f"Spread data keys: {plot_data['spread'].keys()}")
+        
+        # Serialize plot data
+        serialized_data = json.dumps(plot_data)
+        logger.debug(f"Serialized data length: {len(serialized_data)}")
 
         return render_template('index.html', 
-                             plot_data=plot_data,
-                             metrics_plot=metrics_data,
+                             plot_data=serialized_data,
                              start_year=start_year,
                              end_year=end_year,
                              min_year=min_year,

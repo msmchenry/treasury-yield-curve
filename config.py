@@ -17,9 +17,6 @@ class Config:
     DATA_DIR = Path('data')
     DATA_FILE = DATA_DIR / 'treasury_yields.parquet'
     
-    # Data Configuration
-    START_DATE = datetime(2004, 1, 1)
-    
     # FRED Series IDs
     SERIES_IDS = {
         '1 Mo': 'DGS1MO',
