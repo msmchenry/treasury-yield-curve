@@ -177,7 +177,7 @@ class TreasuryService:
     def _create_3d_yield_curve(self, df: pd.DataFrame, forecast_points: int = 0) -> Figure:
         """Create 3D yield curve visualization with forecast."""
         x = np.array([Config.MATURITY_MAP[m] for m in df.columns])
-        y = df.index  # Use actual dates for y-axis
+        y = df.index.strftime('%Y-%m-%d')  # Convert dates to string format
         X, Y = np.meshgrid(x, y)
         Z = df.values
 
@@ -220,7 +220,7 @@ class TreasuryService:
         latest_data = df.iloc[-forecast_points-1]  # Last actual data point
         fig.add_trace(go.Scatter3d(
             x=x.tolist(),
-            y=[latest_data.name] * len(x),  # Use the last date for the current curve
+            y=[latest_data.name.strftime('%Y-%m-%d')] * len(x),  # Use the last date for the current curve
             z=latest_data.values.tolist(),
             mode='lines+markers',
             line=dict(color=PlotConfig.CURRENT_CURVE_COLOR, width=5),
