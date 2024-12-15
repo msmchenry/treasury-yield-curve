@@ -352,21 +352,25 @@ class TreasuryService:
             logger.error("Metrics not calculated. Please load data first.")
             return None
         
+        logger.debug(f"Metrics DataFrame: {self.metrics.head()}")  # Log the metrics DataFrame
+
         fig = go.Figure()
 
         # Plot Inversion Level
+        logger.debug(f"Inversion Level Type: {type(self.metrics['Inversion Level'])}")
         fig.add_trace(go.Scatter(
             x=self.metrics.index,
-            y=self.metrics['Inversion Level'].tolist(),
+            y=self.metrics['Inversion Level'].tolist(),  # Convert to list
             mode='lines',
             name='Inversion Level',
             line=dict(color='blue')
         ))
 
         # Plot Smoothness Level
+        logger.debug(f"Smoothness Level Type: {type(self.metrics['Smoothness Level'])}")
         fig.add_trace(go.Scatter(
             x=self.metrics.index,
-            y=self.metrics['Smoothness Level'].tolist(),
+            y=self.metrics['Smoothness Level'].tolist(),  # Convert to list
             mode='lines',
             name='Smoothness Level',
             line=dict(color='green')
