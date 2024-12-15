@@ -1,6 +1,7 @@
 from typing import Dict, Optional, Any, List
 import pandas as pd
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import json
 from fredapi import Fred
 from datetime import datetime, timedelta
@@ -76,18 +77,21 @@ class TreasuryService:
             raise
 
     def _fetch_fresh_data(self) -> pd.DataFrame:
-        """Fetch fresh data from FRED API."""
-        logger.info("Fetching new data from FRED")
+        """Fetch all available data from FRED API."""
+        logger.info("Fetching all historical data from FRED")
         try:
             df_dict = {}
             for label, series_id in Config.SERIES_IDS.items():
                 logger.debug(f"Fetching data for {label} (Series ID: {series_id})")
-                data = self.fred.get_series(series_id, Config.START_DATE, datetime.now())
+                # Fetch all available data by not specifying start or end dates
+                data = self.fred.get_series(series_id, observation_start='1900-01-01')
                 df_dict[label] = data
 
             df = pd.DataFrame(df_dict)
-            df = df.dropna()
-            df = df.resample('M').last()
+            df = df.dropna()  # Remove dates where any maturity is missing
+            df = df.resample('M').last()  # Resample to monthly frequency
+            
+            logger.info(f"Fetched data from {df.index.min()} to {df.index.max()}")
             
             # Save to parquet file with compression
             df.to_parquet(Config.DATA_FILE, compression='snappy')
@@ -112,9 +116,16 @@ class TreasuryService:
             yield_curve_fig = self._create_3d_yield_curve(combined_df, len(forecast_df))
             spread_fig = self._create_spread_plot(combined_df, len(forecast_df))
 
+            # Ensure that the figures are serialized correctly
+            yield_curve_json = yield_curve_fig.to_dict()
+            spread_json = spread_fig.to_dict()
+
+            logger.debug(f"Yield Curve JSON: {yield_curve_json}")  # Log the yield curve JSON
+            logger.debug(f"Spread JSON: {spread_json}")  # Log the spread JSON
+
             return {
-                'yield_curve': json.dumps(yield_curve_fig.to_dict()),
-                'spread': json.dumps(spread_fig.to_dict())
+                'yield_curve': json.dumps(yield_curve_json),
+                'spread': json.dumps(spread_json)
             }
         except Exception as e:
             logger.error(f"Error creating yield curve plot: {str(e)}")
@@ -128,7 +139,8 @@ class TreasuryService:
                 self.load_data()
                 if self.data is None:
                     raise ValueError("Failed to load data")
-                
+            
+            # Convert input years to dates
             start_year_float = float(start_year)
             end_year_float = float(end_year)
             
@@ -140,12 +152,10 @@ class TreasuryService:
             end_month = int((end_year_float % 1) * 12) + 1
             end_date = datetime(end_year_int, end_month, 1)
             
+            logger.debug(f"Filtering data between {start_date} and {end_date}")
+            
             filtered_df = self.data[(self.data.index >= start_date) & 
                                   (self.data.index <= end_date)].copy()
-            
-            if filtered_df.empty:
-                logger.error(f"No data found between {start_date} and {end_date}")
-                raise ValueError("No data found for selected date range")
             
             return filtered_df
         except Exception as e:
@@ -315,7 +325,7 @@ class TreasuryService:
         return fig 
 
     def calculate_inversion_and_smoothness(self) -> pd.DataFrame:
-        """Calculate continuous inversion level and smoothness of the yield curve."""
+        """Calculate comprehensive yield curve metrics."""
         if self.data is None:
             logger.error("Data not loaded. Attempting to load now...")
             self.load_data()
@@ -324,67 +334,157 @@ class TreasuryService:
         
         metrics_df = pd.DataFrame(index=self.data.index)
         
-        # Calculate continuous inversion level as the average difference between all yields
+        # 1. Traditional 2Y-10Y Spread (most watched indicator)
+        metrics_df['2Y10Y_Spread'] = self.data['10 Yr'] - self.data['2 Yr']
+        
+        # 2. Enhanced Inversion Metrics
+        # Short-end inversion (3M-2Y)
+        metrics_df['Short_End_Spread'] = self.data['2 Yr'] - self.data['3 Mo']
+        # Long-end inversion (10Y-30Y)
+        metrics_df['Long_End_Spread'] = self.data['30 Yr'] - self.data['10 Yr']
+        
+        # 3. Comprehensive Inversion Level (weighted by maturity difference)
         yield_differences = []
-        for i in range(len(self.data.columns)):
-            for j in range(i + 1, len(self.data.columns)):
-                yield_differences.append(self.data.iloc[:, i] - self.data.iloc[:, j])
+        weights = []
+        maturities = {
+            '1 Mo': 1/12, '3 Mo': 0.25, '6 Mo': 0.5, '1 Yr': 1,
+            '2 Yr': 2, '5 Yr': 5, '10 Yr': 10, '30 Yr': 30
+        }
         
-        metrics_df['Inversion Level'] = pd.concat(yield_differences, axis=1).mean(axis=1)
+        for i, col1 in enumerate(self.data.columns):
+            for j, col2 in enumerate(self.data.columns[i+1:], i+1):
+                diff = self.data[col1] - self.data[col2]
+                # Weight by log of maturity difference to reduce impact of very long terms
+                weight = np.log(abs(maturities[col2] - maturities[col1]) + 1)
+                yield_differences.append(diff * weight)
+                weights.append(weight)
         
-        # Calculate smoothness level (standard deviation of yields)
-        metrics_df['Smoothness Level'] = self.data.std(axis=1)
+        metrics_df['Weighted_Inversion'] = (
+            pd.concat(yield_differences, axis=1).sum(axis=1) / sum(weights)
+        )
         
-        # Classify smoothness
+        # 4. Enhanced Smoothness Metrics
+        # Standard deviation (existing)
+        metrics_df['Smoothness_Std'] = self.data.std(axis=1)
+        
+        # Curvature (second derivative approximation)
+        maturities_array = np.array([maturities[col] for col in self.data.columns])
+        for idx in self.data.index:
+            yields = self.data.loc[idx].values
+            # Fit a polynomial and get second derivative
+            coeffs = np.polyfit(maturities_array, yields, 2)
+            metrics_df.loc[idx, 'Curvature'] = coeffs[0] * 2
+        
+        # 5. Advanced Classification
         conditions = [
-            (metrics_df['Smoothness Level'] < 0.1),  # Flat
-            (metrics_df['Smoothness Level'] >= 0.1) & (metrics_df['Smoothness Level'] < 0.5),  # Normal
-            (metrics_df['Smoothness Level'] >= 0.5)  # Inverted
+            # Deeply inverted
+            (metrics_df['Weighted_Inversion'] > 0.5),
+            # Mildly inverted
+            (metrics_df['Weighted_Inversion'] > 0) & (metrics_df['Weighted_Inversion'] <= 0.5),
+            # Flat
+            (abs(metrics_df['Weighted_Inversion']) <= 0.1) & (metrics_df['Smoothness_Std'] < 0.2),
+            # Steep
+            (metrics_df['Weighted_Inversion'] < -0.5),
+            # Normal
+            (True)  # default case
         ]
-        choices = ['Flat', 'Normal', 'Inverted']
-        metrics_df['Curve Type'] = np.select(conditions, choices, default='Unknown')
+        
+        choices = ['Deeply Inverted', 'Mildly Inverted', 'Flat', 'Steep', 'Normal']
+        metrics_df['Curve_Type'] = np.select(conditions, choices, default='Unknown')
+        
+        # 6. Market Stress Indicator
+        metrics_df['Stress_Level'] = (
+            self.normalize(abs(metrics_df['Weighted_Inversion'])) * 0.4 +
+            self.normalize(metrics_df['Smoothness_Std']) * 0.3 +
+            self.normalize(abs(metrics_df['Curvature'])) * 0.3
+        )
         
         return metrics_df
 
+    def normalize(self, series):
+        """Min-max normalization of a series."""
+        return (series - series.min()) / (series.max() - series.min())
+
     def plot_metrics(self) -> Figure:
-        """Plot continuous inversion level and smoothness level over time."""
+        """Enhanced metrics visualization."""
         if self.metrics is None:
             logger.error("Metrics not calculated. Please load data first.")
             return None
+
+        # Convert dates for x-axis
+        dates = [d.strftime('%Y-%m-%d') for d in self.metrics.index]
         
-        logger.debug(f"Metrics DataFrame: {self.metrics.head()}")  # Log the metrics DataFrame
-
-        fig = go.Figure()
-
-        # Plot Inversion Level
-        logger.debug(f"Inversion Level Type: {type(self.metrics['Inversion Level'])}")
-        fig.add_trace(go.Scatter(
-            x=self.metrics.index,
-            y=self.metrics['Inversion Level'].tolist(),  # Convert to list
-            mode='lines',
-            name='Inversion Level',
-            line=dict(color='blue')
-        ))
-
-        # Plot Smoothness Level
-        logger.debug(f"Smoothness Level Type: {type(self.metrics['Smoothness Level'])}")
-        fig.add_trace(go.Scatter(
-            x=self.metrics.index,
-            y=self.metrics['Smoothness Level'].tolist(),  # Convert to list
-            mode='lines',
-            name='Smoothness Level',
-            line=dict(color='green')
-        ))
-
+        fig = make_subplots(
+            rows=2, cols=2,
+            subplot_titles=(
+                '2Y-10Y Spread',
+                'Market Stress Level',
+                'Yield Curve Curvature',
+                'Yield Curve Smoothness'
+            )
+        )
+        
+        # Plot 1: Traditional Spreads
+        fig.add_trace(
+            go.Scatter(
+                x=dates,
+                y=self.metrics['2Y10Y_Spread'].values.tolist(),
+                name='2Y-10Y Spread',
+                line=dict(color='blue')
+            ),
+            row=1, col=1
+        )
+        
+        # Plot 2: Stress Level
+        fig.add_trace(
+            go.Scatter(
+                x=dates,
+                y=self.metrics['Stress_Level'].values.tolist(),
+                name='Market Stress',
+                line=dict(color='red')
+            ),
+            row=1, col=2
+        )
+        
+        # Plot 3: Curvature
+        fig.add_trace(
+            go.Scatter(
+                x=dates,
+                y=self.metrics['Curvature'].values.tolist(),
+                name='Curvature',
+                line=dict(color='green')
+            ),
+            row=2, col=1
+        )
+        
+        # Plot 4: Smoothness
+        fig.add_trace(
+            go.Scatter(
+                x=dates,
+                y=self.metrics['Smoothness_Std'].values.tolist(),
+                name='Smoothness',
+                line=dict(color='purple')
+            ),
+            row=2, col=2
+        )
+        
         # Update layout
         fig.update_layout(
-            title='Yield Curve Metrics Over Time',
-            xaxis_title='Date',
-            yaxis_title='Value',
-            template='plotly_white',
+            height=800,  # Increased height for better visibility
             showlegend=True,
-            height=400,
-            margin=dict(l=0, r=0, b=50, t=40)
+            template='plotly_white',
+            title_text="Yield Curve Analysis Metrics",
         )
+        
+        # Update x-axes
+        for i in range(1, 3):
+            for j in range(1, 3):
+                fig.update_xaxes(
+                    title_text='Date',
+                    tickformat='%Y-%m',
+                    tickangle=45,
+                    row=i,
+                    col=j
+                )
 
         return fig
