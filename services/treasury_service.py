@@ -177,7 +177,7 @@ class TreasuryService:
     def _create_3d_yield_curve(self, df: pd.DataFrame, forecast_points: int = 0) -> Figure:
         """Create 3D yield curve visualization with forecast."""
         x = np.array([Config.MATURITY_MAP[m] for m in df.columns])
-        y = np.array([(d - df.index[-1]).days for d in df.index])
+        y = df.index  # Use actual dates for y-axis
         X, Y = np.meshgrid(x, y)
         Z = df.values
 
@@ -194,7 +194,7 @@ class TreasuryService:
             showscale=True,
             hovertemplate=(
                 'Maturity: %{x:.1f} years<br>'
-                'Days ago: %{y:.0f}<br>'
+                'Date: %{y}<br>'
                 'Yield: %{z:.2f}%<extra></extra>'
             )
         ))
@@ -211,7 +211,7 @@ class TreasuryService:
                 opacity=0.7,
                 hovertemplate=(
                     'Maturity: %{x:.1f} years<br>'
-                    'Days ahead: %{y:.0f}<br>'
+                    'Forecast Date: %{y}<br>'
                     'Forecast Yield: %{z:.2f}%<extra>Forecast</extra>'
                 )
             ))
@@ -220,7 +220,7 @@ class TreasuryService:
         latest_data = df.iloc[-forecast_points-1]  # Last actual data point
         fig.add_trace(go.Scatter3d(
             x=x.tolist(),
-            y=[0] * len(x),
+            y=[latest_data.name] * len(x),  # Use the last date for the current curve
             z=latest_data.values.tolist(),
             mode='lines+markers',
             line=dict(color=PlotConfig.CURRENT_CURVE_COLOR, width=5),
@@ -232,7 +232,7 @@ class TreasuryService:
             title='US Treasury Yield Curve Evolution (with 1Q Forecast)',
             scene=dict(
                 xaxis_title='Maturity (Years)',
-                yaxis_title='Days',
+                yaxis_title='Date',
                 zaxis_title='Yield (%)',
                 xaxis=dict(type='log', tickformat='.1f'),
                 camera=dict(
