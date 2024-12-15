@@ -26,14 +26,17 @@
 
         <div id="yield-curve-plot"></div>
         <div id="spread-plot"></div>
+        <div id="metrics-plot"></div>
     </div>
 
     <script>
         const yieldCurveData = {{ plot_data.yield_curve | safe }};
         const spreadData = {{ plot_data.spread | safe }};
+        const metricsData = {{ metrics_plot | safe }};
         
         Plotly.newPlot('yield-curve-plot', yieldCurveData.data, yieldCurveData.layout);
         Plotly.newPlot('spread-plot', spreadData.data, spreadData.layout);
+        Plotly.newPlot('metrics-plot', metricsData.data, metricsData.layout);
 
         // Initialize slider
         const slider = document.getElementById('dateSlider');

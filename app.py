@@ -5,6 +5,7 @@ from datetime import datetime
 from config import Config
 from typing import Tuple, Union
 from http import HTTPStatus
+import json
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG)
@@ -64,8 +65,11 @@ def index() -> Union[str, Tuple[str, int]]:
             return "Invalid year parameters", HTTPStatus.BAD_REQUEST
 
         plot_data = treasury_service.get_yield_curve_plot(start_year, end_year)
+        metrics_plot = treasury_service.plot_metrics()  # Get metrics plot
+
         return render_template('index.html', 
                              plot_data=plot_data,
+                             metrics_plot=json.dumps(metrics_plot.to_dict()),  # Pass metrics plot
                              start_year=start_year,
                              end_year=end_year)
     except Exception as e:

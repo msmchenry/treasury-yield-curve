@@ -68,6 +68,9 @@ class TreasuryService:
 
             if should_fetch:
                 self.data = self._fetch_fresh_data()
+            
+            # Calculate metrics after loading data
+            self.metrics = self.calculate_inversion_and_smoothness()
         except Exception as e:
             logger.error(f"Error loading yield curve data: {str(e)}")
             raise
@@ -310,3 +313,74 @@ class TreasuryService:
         )
         
         return fig 
+
+    def calculate_inversion_and_smoothness(self) -> pd.DataFrame:
+        """Calculate continuous inversion level and smoothness of the yield curve."""
+        if self.data is None:
+            logger.error("Data not loaded. Attempting to load now...")
+            self.load_data()
+            if self.data is None:
+                raise ValueError("Failed to load data")
+        
+        metrics_df = pd.DataFrame(index=self.data.index)
+        
+        # Calculate continuous inversion level as the average difference between all yields
+        yield_differences = []
+        for i in range(len(self.data.columns)):
+            for j in range(i + 1, len(self.data.columns)):
+                yield_differences.append(self.data.iloc[:, i] - self.data.iloc[:, j])
+        
+        metrics_df['Inversion Level'] = pd.concat(yield_differences, axis=1).mean(axis=1)
+        
+        # Calculate smoothness level (standard deviation of yields)
+        metrics_df['Smoothness Level'] = self.data.std(axis=1)
+        
+        # Classify smoothness
+        conditions = [
+            (metrics_df['Smoothness Level'] < 0.1),  # Flat
+            (metrics_df['Smoothness Level'] >= 0.1) & (metrics_df['Smoothness Level'] < 0.5),  # Normal
+            (metrics_df['Smoothness Level'] >= 0.5)  # Inverted
+        ]
+        choices = ['Flat', 'Normal', 'Inverted']
+        metrics_df['Curve Type'] = np.select(conditions, choices, default='Unknown')
+        
+        return metrics_df
+
+    def plot_metrics(self) -> Figure:
+        """Plot continuous inversion level and smoothness level over time."""
+        if self.metrics is None:
+            logger.error("Metrics not calculated. Please load data first.")
+            return None
+        
+        fig = go.Figure()
+
+        # Plot Inversion Level
+        fig.add_trace(go.Scatter(
+            x=self.metrics.index,
+            y=self.metrics['Inversion Level'].tolist(),
+            mode='lines',
+            name='Inversion Level',
+            line=dict(color='blue')
+        ))
+
+        # Plot Smoothness Level
+        fig.add_trace(go.Scatter(
+            x=self.metrics.index,
+            y=self.metrics['Smoothness Level'].tolist(),
+            mode='lines',
+            name='Smoothness Level',
+            line=dict(color='green')
+        ))
+
+        # Update layout
+        fig.update_layout(
+            title='Yield Curve Metrics Over Time',
+            xaxis_title='Date',
+            yaxis_title='Value',
+            template='plotly_white',
+            showlegend=True,
+            height=400,
+            margin=dict(l=0, r=0, b=50, t=40)
+        )
+
+        return fig
