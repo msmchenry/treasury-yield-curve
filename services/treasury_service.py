@@ -119,19 +119,35 @@ class TreasuryService:
 
     def _filter_data_by_date_range(self, start_year: str, end_year: str) -> pd.DataFrame:
         """Filter DataFrame by date range."""
-        start_year_float = float(start_year)
-        end_year_float = float(end_year)
-        
-        start_year_int = int(start_year_float)
-        start_month = int((start_year_float % 1) * 12) + 1
-        start_date = datetime(start_year_int, start_month, 1)
-        
-        end_year_int = int(end_year_float)
-        end_month = int((end_year_float % 1) * 12) + 1
-        end_date = datetime(end_year_int, end_month, 1)
-        
-        return self.data[(self.data.index >= start_date) & 
-                        (self.data.index <= end_date)].copy()
+        try:
+            if self.data is None:
+                logger.error("Data not loaded. Attempting to load now...")
+                self.load_data()
+                if self.data is None:
+                    raise ValueError("Failed to load data")
+                
+            start_year_float = float(start_year)
+            end_year_float = float(end_year)
+            
+            start_year_int = int(start_year_float)
+            start_month = int((start_year_float % 1) * 12) + 1
+            start_date = datetime(start_year_int, start_month, 1)
+            
+            end_year_int = int(end_year_float)
+            end_month = int((end_year_float % 1) * 12) + 1
+            end_date = datetime(end_year_int, end_month, 1)
+            
+            filtered_df = self.data[(self.data.index >= start_date) & 
+                                  (self.data.index <= end_date)].copy()
+            
+            if filtered_df.empty:
+                logger.error(f"No data found between {start_date} and {end_date}")
+                raise ValueError("No data found for selected date range")
+            
+            return filtered_df
+        except Exception as e:
+            logger.error(f"Error in _filter_data_by_date_range: {str(e)}")
+            raise
 
     def _generate_forecast(self, df: pd.DataFrame, periods: int = 3) -> pd.DataFrame:
         """Generate yield curve forecast using Ridge regression."""

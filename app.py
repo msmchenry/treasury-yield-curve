@@ -16,6 +16,17 @@ app.config.from_object(Config)
 # Initialize treasury service
 treasury_service = TreasuryService()
 
+# Load initial data
+logger.info("Loading initial yield curve data...")
+try:
+    treasury_service.load_data()
+    if treasury_service.data is None:
+        raise ValueError("Failed to initialize data")
+    logger.info(f"Data loaded successfully. Shape: {treasury_service.data.shape}")
+except Exception as e:
+    logger.error(f"Error loading initial data: {str(e)}")
+    raise
+
 def validate_year_input(year: str) -> bool:
     """Validate that the year input is within acceptable range."""
     try:
@@ -29,6 +40,14 @@ def index() -> Union[str, Tuple[str, int]]:
     """Main route for displaying treasury yield curves."""
     logger.debug("Index route accessed")
     try:
+        # Ensure data is loaded
+        if treasury_service.data is None:
+            logger.info("Data not loaded, attempting to reload...")
+            treasury_service.load_data()
+            
+        if treasury_service.data is None:
+            return "Unable to load Treasury data. Please try again later.", HTTPStatus.SERVICE_UNAVAILABLE
+        
         # Default to last 2 quarters if no dates specified
         current_date = datetime.now()
         current_year = current_date.year
@@ -60,9 +79,4 @@ def handle_error(error: Exception) -> Tuple[str, int]:
     return "An error occurred", HTTPStatus.INTERNAL_SERVER_ERROR
 
 if __name__ == '__main__':
-    # Load initial data
-    logger.info("Loading initial yield curve data...")
-    treasury_service.load_data()
-    logger.info("Data loaded successfully")
-    
     app.run(debug=True) 
