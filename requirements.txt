@@ -1,0 +1,13 @@
+Flask==3.0.2
+pandas==2.2.1
+numpy==1.26.4
+requests==2.31.0
+python-dotenv==1.0.1
+plotly==5.19.0
+gunicorn==21.2.0
+fredapi==0.5.1
+pyarrow==15.0.0
+pytest==8.0.0
+mypy==1.8.0
+black==24.1.1
+scikit-learn==1.4.0 

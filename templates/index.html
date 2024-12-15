@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>US Treasury Yield Curve</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/nouislider@14.6.3/distribute/nouislider.min.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/nouislider@14.6.3/distribute/nouislider.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <h1>US Treasury Yield Curve Analysis</h1>
+        
+        <div class="controls">
+            <div class="slider-container">
+                <div id="dateSlider"></div>
+                <div class="slider-labels">
+                    <span id="startLabel"></span>
+                    <span id="endLabel"></span>
+                </div>
+            </div>
+            <button onclick="updatePlot()">Update Plot</button>
+        </div>
+
+        <div id="yield-curve-plot"></div>
+        <div id="spread-plot"></div>
+    </div>
+
+    <script>
+        const yieldCurveData = {{ plot_data.yield_curve | safe }};
+        const spreadData = {{ plot_data.spread | safe }};
+        
+        Plotly.newPlot('yield-curve-plot', yieldCurveData.data, yieldCurveData.layout);
+        Plotly.newPlot('spread-plot', spreadData.data, spreadData.layout);
+
+        // Initialize slider
+        const slider = document.getElementById('dateSlider');
+        const currentYear = new Date().getFullYear();
+        
+        noUiSlider.create(slider, {
+            start: [
+                {{ start_year }},  // Use the passed start_year
+                {{ end_year }}     // Use the passed end_year
+            ],
+            connect: true,
+            step: 0.25,
+            range: {
+                'min': 2004,
+                'max': currentYear + 1
+            }
+        });
+
+        function formatQuarter(value) {
+            const year = Math.floor(value);
+            const quarter = Math.round((value % 1) * 4);
+            const quarterLabels = ['Q1', 'Q2', 'Q3', 'Q4'];
+            return `${year} ${quarter > 0 ? quarterLabels[quarter-1] : ''}`;
+        }
+
+        slider.noUiSlider.on('update', function (values) {
+            document.getElementById('startLabel').textContent = formatQuarter(values[0]);
+            document.getElementById('endLabel').textContent = formatQuarter(values[1]);
+        });
+
+        function updatePlot() {
+            const [startYear, endYear] = slider.noUiSlider.get();
+            window.location.href = `/?start_year=${startYear}&end_year=${endYear}`;
+        }
+    </script>
+</body>
+</html> 

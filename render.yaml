@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: treasury-yield-curve
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn wsgi:app
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.9.0
+      - key: FRED_API_KEY
+        sync: false 
